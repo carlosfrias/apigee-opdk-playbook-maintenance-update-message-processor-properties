@@ -1,0 +1,75 @@
+---
+- hosts: planet
+  strategy: free
+
+  roles:
+  - apigee-opdk-setup-default-settings
+
+
+- hosts: rmp
+  strategy: free
+
+  vars_files:
+  - ~/.apigee/credentials.yml
+
+  vars_prompt:
+  - name: property_file
+    prompt: 'Please provide the path to the message-processor.properties file'
+    private: no
+
+  pre_tasks:
+  - name: Status of RMPs before doing any work
+    ignore_errors: yes
+    shell: "{{ apigee_all }} status"
+
+  roles:
+  - apigee-opdk-setup-selinux-disable
+  - { role: apigee-opdk-set-reachable, reachable: false, server_type: mp }
+  - { role: apigee-opdk-set-reachable, reachable: false, server_type: router }
+
+  tasks:
+  - name: Upload the message-processor.properties
+    become: yes
+    copy:
+      src: "{{ property_file }}"
+      dest: "{{ apigee_installation_home }}/customer/application"
+      backup: yes
+      force: yes
+      group: '{{ opdk_user_name }}'
+      owner: '{{ opdk_group_name }}'
+
+- hosts: rmp
+  serial: 1
+  vars_files:
+  - ~/.apigee/credentials.yml
+  pre_tasks:
+  - name: Status of RMPs before stopping
+    ignore_errors: yes
+    shell: "{{ apigee_all }} status"
+  roles:
+  - { role: apigee-opdk-set-reachable, reachable: false, server_type: mp }
+  - { role: apigee-opdk-set-reachable, reachable: false, server_type: router }
+  tasks:
+  - name: Stopping the RMP
+    ignore_errors: yes
+    shell: "{{ apigee_all }} stop"
+
+  - name: Wait for the RMP to finish restarting
+    become: no
+    local_action: wait_for host='{{ ansible_host }}' state=started delay=60 timeout='{{ server_restart_timeout | d(360) }}'
+
+  - name: Starting the RMP
+    shell: "{{ apigee_all }} start"
+
+  - name: Status of RMPs after restarting
+    shell: "{{ apigee_all }} status"
+
+
+- hosts: rmp
+  strategy: free
+  vars_files:
+  - ~/.apigee/credentials.yml
+  roles:
+  - { role: apigee-opdk-set-reachable, reachable: true, server_type: mp }
+  - { role: apigee-opdk-set-reachable, reachable: true, server_type: router }
+
